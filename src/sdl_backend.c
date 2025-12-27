@@ -1,6 +1,8 @@
 #include <SDL.h>
 #include <time.h>
+#if !defined(_WIN32)
 #include <sys/time.h>
+#endif
 #include "backend.h"
 #ifndef ENGINE
 #include "engine.c"
@@ -175,9 +177,14 @@ bool handle_input() {
     return false;
 }
 uint32_t now() {
+#if defined(_WIN32)
+    // Windows 没有 <sys/time.h>；这里用 SDL 自带的毫秒计时即可
+    return SDL_GetTicks();
+#else
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (((long long)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+#endif
 }
 
 void MyAudioCallback(void* userdata, Uint8* stream, int len) {

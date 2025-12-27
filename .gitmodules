@@ -1,21 +1,21 @@
 [submodule "lua"]
 	path = lua
-	url = git@github.com:DavidVentura/z8lua.git
+	url = https://github.com/DavidVentura/z8lua.git
 [submodule "SDL"]
 	path = SDL
-	url = git@github.com:libsdl-org/SDL.git
+	url = https://github.com/libsdl-org/SDL.git
 [submodule "SDL_mixer"]
 	path = SDL_mixer
-	url = git@github.com:libsdl-org/SDL_mixer.git
+	url = https://github.com/libsdl-org/SDL_mixer.git
 [submodule "board/modules/kicad-libraries"]
 	path = board/modules/esp32
-	url = git@github.com:espressif/kicad-libraries.git
+	url = https://github.com/espressif/kicad-libraries.git
 [submodule "rawdraw"]
 	path = rawdraw
-	url = git@github.com:cntools/rawdraw.git
+	url = https://github.com/cntools/rawdraw.git
 [submodule "rawdrawandroid"]
 	path = rawdrawandroid
-	url = git@github.com:cnlohr/rawdrawandroid.git
+	url = https://github.com/cnlohr/rawdrawandroid.git
 [submodule "cnfa"]
 	path = cnfa
-	url = git@github.com:davidventura/cnfa.git
+	url = https://github.com/davidventura/cnfa.git

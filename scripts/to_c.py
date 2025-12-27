@@ -32,14 +32,21 @@ def chunked(lst, chunk_size: int):
     return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
 
 def compile_lua_to_bytecode(luac: str, code: bytes) -> bytes:
-    with tempfile.NamedTemporaryFile() as named:
-        with subprocess.Popen([luac, '-o', named.name, '-s', '-'], stdin=subprocess.PIPE) as p:
+    # Windows 下 NamedTemporaryFile 会保持文件句柄打开，导致 luac 无法打开/写入该路径
+    fd, out_path = tempfile.mkstemp()
+    os.close(fd)
+    try:
+        with subprocess.Popen([luac, '-o', out_path, '-s', '-'], stdin=subprocess.PIPE) as p:
             p.communicate(code)
         if p.returncode != 0:
             raise ValueError("dead")
-        named.flush()
-        named.seek(0)
-        return named.read()
+        with open(out_path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
 
 def process_cart(luac: str, name: str, data: bytes) -> GameCart:
     LUA_HEADER = b'__lua__'

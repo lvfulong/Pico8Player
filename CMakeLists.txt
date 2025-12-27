@@ -35,19 +35,20 @@ project(my_project C CXX ASM)
 if(NOT BACKEND  STREQUAL "ESP32")
 add_subdirectory(local_lua)
 endif()
-add_compile_options(
-	#	-Werror
-	#-g3
-        -Wno-unused-variable
-)
+if(NOT MSVC)
+	add_compile_options(
+		#	-Werror
+		#-g3
+		-Wno-unused-variable
+	)
+endif()
 
-SET(luac ${CMAKE_CURRENT_BINARY_DIR}/local_lua/luac)
 file(GLOB ALL_RESOURCE_FILES CONFIGURE_DEPENDS stdlib/stdlib.lua artifacts/font.lua carts/* scripts/to_c.py)
 add_custom_command(
 	OUTPUT ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
-	COMMAND python3 scripts/to_c.py --emit-stdlib --luac ${luac} carts/ > ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
+	COMMAND python3 scripts/to_c.py --emit-stdlib --luac $<TARGET_FILE:luac> carts/ > ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	DEPENDS ${ALL_RESOURCE_FILES}
+	DEPENDS luac ${ALL_RESOURCE_FILES}
 	)
 
 file(GLOB ALL_SOURCE_FILES CONFIGURE_DEPENDS *.c *.h esp/*.c esp/*.h)
@@ -64,8 +65,8 @@ if(BACKEND STREQUAL "PC")
 		src/generated/static_game_data.h
 		src/entrypoint.cpp
 		)
-	add_subdirectory(SDL_mixer)
 	add_subdirectory(SDL)
+	add_subdirectory(SDL_mixer)
 	add_subdirectory(lua)
 
 	target_link_libraries(pc_pico
@@ -81,14 +82,29 @@ if(BACKEND STREQUAL "PC")
 		SDL_mixer
 		)
 
-	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg -fsingle-precision-constant -Wall -Wshadow -Wundef -fsanitize=address")
-	SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")
-	SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -pg")
-        target_compile_options(pc_pico PRIVATE -DSDL_BACKEND=1 -DLUA_USE_LINUX=1 -DW_SCREEN_HEIGHT=512 -DW_SCREEN_WIDTH=512 -DSCREEN_WIDTH=128 -DSCREEN_HEIGHT=128 -DHUD_HEIGHT=12)
-	add_compile_options(
-		-g3
-		-fsingle-precision-constant
+	target_compile_definitions(pc_pico PRIVATE
+		SDL_BACKEND=1
+		W_SCREEN_HEIGHT=512
+		W_SCREEN_WIDTH=512
+		SCREEN_WIDTH=128
+		SCREEN_HEIGHT=128
+		HUD_HEIGHT=12
+	)
+	# Lua 平台宏：Windows 下 luaconf.h 会基于 _WIN32 自动启用 LUA_WIN；非 Windows 则沿用 LUA_USE_LINUX
+	if(UNIX AND NOT APPLE)
+		target_compile_definitions(pc_pico PRIVATE LUA_USE_LINUX=1)
+	endif()
+
+	# 下面这些 flags 是 GCC/Clang 特有；MSVC 下会直接报错，故仅在非 MSVC 启用
+	if(NOT MSVC)
+		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg -fsingle-precision-constant -Wall -Wshadow -Wundef -fsanitize=address")
+		SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")
+		SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -pg")
+		add_compile_options(
+			-g3
+			-fsingle-precision-constant
 		)
+	endif()
 
 	if(APPLE)
 		add_custom_command(TARGET pc_pico POST_BUILD COMMAND codesign -s - ./pc_pico)
