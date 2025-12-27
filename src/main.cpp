@@ -26,6 +26,9 @@ int16_t drawMenu() {
     delay(10);
     while(!wants_to_quit) {
 
+        // 先处理输入，再更新菜单逻辑
+        wants_to_quit = handle_input();
+
         if (buttons_frame[BTN_IDX_DOWN]) {
             highlighted = (highlighted + 1) % cartCount;
             changed = true;
@@ -34,6 +37,11 @@ int16_t drawMenu() {
         if (buttons_frame[BTN_IDX_UP]) {
              highlighted = highlighted == 0 ? cartCount - 1 : highlighted - 1;
              changed = true;
+        }
+
+        // 按下 A/B（PC: Z/X）进入选中的游戏
+        if (buttons_frame[BTN_IDX_A] || buttons_frame[BTN_IDX_B]) {
+            return highlighted;
         }
 
         if(changed) {
@@ -57,11 +65,9 @@ int16_t drawMenu() {
             changed = false;
         }
 
-        if (buttons[4] || buttons[5]) {
-            return highlighted;
-        }
-
-		flip();
+        // 展示当前帧（这里不再调用 flip()，避免重复处理输入）
+        gfx_flip();
+        delay(10);
     }
     return -1;
 }

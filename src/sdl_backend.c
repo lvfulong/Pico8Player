@@ -124,6 +124,9 @@ bool handle_input() {
 		    break;
 
 		case SDLK_z:
+		case SDLK_RETURN:
+		case SDLK_KP_ENTER:
+		case SDLK_SPACE:
 		    buttons_frame[BTN_IDX_A] = buttons[BTN_IDX_A] == 0 && buttons_frame[BTN_IDX_A] == 0;
 		    buttons[BTN_IDX_A] = 1;
 		    break;
@@ -162,6 +165,9 @@ bool handle_input() {
 		    break;
 
 		case SDLK_z:
+		case SDLK_RETURN:
+		case SDLK_KP_ENTER:
+		case SDLK_SPACE:
 		    buttons[BTN_IDX_A] = 0;
 		    buttons_frame[BTN_IDX_A] = 0;
 		    break;
