@@ -47,6 +47,10 @@ bool init_video()
     SDL_RenderClear(gRenderer);
     SDL_SetRenderDrawColor( gRenderer, 0xFF, 0xFF, 0xFF, 0xFF );
 
+    // Disable text input to prevent IME/input method interference
+    // This ensures keyboard events are captured even with Chinese input method active
+    SDL_StopTextInput();
+
     return true;
 }
 
@@ -101,24 +105,26 @@ bool handle_input() {
 	{
 	    return true;
 	} else if (e.type == SDL_KEYDOWN) {
-	    switch( e.key.keysym.sym )
+	    // Use scancode instead of keysym to avoid IME/input method interference
+	    // Scancodes represent physical keys and are not affected by input methods
+	    switch( e.key.keysym.scancode )
 	    {
-		case SDLK_LEFT:
+		case SDL_SCANCODE_LEFT:
 		    buttons_frame[BTN_IDX_LEFT] = buttons[BTN_IDX_LEFT] == 0 && buttons_frame[BTN_IDX_LEFT] == 0;
 		    buttons[BTN_IDX_LEFT] = 1;
 		    break;
 
-		case SDLK_RIGHT:
+		case SDL_SCANCODE_RIGHT:
 		    buttons_frame[BTN_IDX_RIGHT] = buttons[BTN_IDX_RIGHT] == 0 && buttons_frame[BTN_IDX_RIGHT] == 0;
 		    buttons[BTN_IDX_RIGHT] = 1;
 		    break;
 
-		case SDLK_UP:
+		case SDL_SCANCODE_UP:
 		    buttons_frame[BTN_IDX_UP] = (buttons[BTN_IDX_UP] == 0 && buttons_frame[BTN_IDX_UP] == 0);
 		    buttons[BTN_IDX_UP] = 1;
 		    break;
 
-		case SDLK_DOWN:
+		case SDL_SCANCODE_DOWN:
 		    buttons_frame[BTN_IDX_DOWN] = buttons[BTN_IDX_DOWN] == 0 && buttons_frame[BTN_IDX_DOWN] == 0;
 		    buttons[BTN_IDX_DOWN] = 1;
 		    break;
@@ -128,59 +134,60 @@ bool handle_input() {
 		// - btn(4) "O button": Z (primary) or Left Shift (alternate)
 		// - btn(5) "X button": X (primary) or Left Ctrl (alternate)
 		//
-		// Reference: PICO-8 manual - default keyboard controls
-		case SDLK_z:
-		case SDLK_LSHIFT:
-		case SDLK_RSHIFT:
+		// Using scancodes to avoid IME/input method interference
+		case SDL_SCANCODE_Z:
+		case SDL_SCANCODE_LSHIFT:
+		case SDL_SCANCODE_RSHIFT:
 		    buttons_frame[BTN_IDX_A] = buttons[BTN_IDX_A] == 0 && buttons_frame[BTN_IDX_A] == 0;
 		    buttons[BTN_IDX_A] = 1;
 		    break;
 
-		case SDLK_x:
-		case SDLK_LCTRL:
-		case SDLK_RCTRL:
+		case SDL_SCANCODE_X:
+		case SDL_SCANCODE_LCTRL:
+		case SDL_SCANCODE_RCTRL:
 		    buttons_frame[BTN_IDX_B] = buttons[BTN_IDX_B] == 0 && buttons_frame[BTN_IDX_B] == 0;
 		    buttons[BTN_IDX_B] = 1;
 		    break;
 
-		case SDLK_ESCAPE:
-		case SDLK_q:
+		case SDL_SCANCODE_ESCAPE:
+		case SDL_SCANCODE_Q:
 		    return true;
 
 	    }
 	} else if (e.type == SDL_KEYUP) {
-	    switch( e.key.keysym.sym )
+	    // Use scancode instead of keysym to avoid IME/input method interference
+	    switch( e.key.keysym.scancode )
 	    {
-		case SDLK_LEFT:
+		case SDL_SCANCODE_LEFT:
 		    buttons[BTN_IDX_LEFT] = 0;
 		    buttons_frame[BTN_IDX_LEFT] = 0;
 		    break;
 
-		case SDLK_RIGHT:
+		case SDL_SCANCODE_RIGHT:
 		    buttons[BTN_IDX_RIGHT] = 0;
 		    buttons_frame[BTN_IDX_RIGHT] = 0;
 		    break;
 
-		case SDLK_UP:
+		case SDL_SCANCODE_UP:
 		    buttons[BTN_IDX_UP] = 0;
 		    buttons_frame[BTN_IDX_UP] = 0;
 		    break;
 
-		case SDLK_DOWN:
+		case SDL_SCANCODE_DOWN:
 		    buttons[BTN_IDX_DOWN] = 0;
 		    buttons_frame[BTN_IDX_DOWN] = 0;
 		    break;
 
-		case SDLK_z:
-		case SDLK_LSHIFT:
-		case SDLK_RSHIFT:
+		case SDL_SCANCODE_Z:
+		case SDL_SCANCODE_LSHIFT:
+		case SDL_SCANCODE_RSHIFT:
 		    buttons[BTN_IDX_A] = 0;
 		    buttons_frame[BTN_IDX_A] = 0;
 		    break;
 
-		case SDLK_x:
-		case SDLK_LCTRL:
-		case SDLK_RCTRL:
+		case SDL_SCANCODE_X:
+		case SDL_SCANCODE_LCTRL:
+		case SDL_SCANCODE_RCTRL:
 		    buttons[BTN_IDX_B] = 0;
 		    buttons_frame[BTN_IDX_B] = 0;
 		    break;
