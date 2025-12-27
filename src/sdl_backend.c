@@ -123,15 +123,22 @@ bool handle_input() {
 		    buttons[BTN_IDX_DOWN] = 1;
 		    break;
 
+		// PICO-8 default keyboard mapping (player 1) per official docs:
+		// - btn(0..3): arrow keys (← → ↑ ↓)
+		// - btn(4) "O button": Z (primary) or Left Shift (alternate)
+		// - btn(5) "X button": X (primary) or Left Ctrl (alternate)
+		//
+		// Reference: PICO-8 manual - default keyboard controls
 		case SDLK_z:
-		case SDLK_RETURN:
-		case SDLK_KP_ENTER:
-		case SDLK_SPACE:
+		case SDLK_LSHIFT:
+		case SDLK_RSHIFT:
 		    buttons_frame[BTN_IDX_A] = buttons[BTN_IDX_A] == 0 && buttons_frame[BTN_IDX_A] == 0;
 		    buttons[BTN_IDX_A] = 1;
 		    break;
 
 		case SDLK_x:
+		case SDLK_LCTRL:
+		case SDLK_RCTRL:
 		    buttons_frame[BTN_IDX_B] = buttons[BTN_IDX_B] == 0 && buttons_frame[BTN_IDX_B] == 0;
 		    buttons[BTN_IDX_B] = 1;
 		    break;
@@ -165,14 +172,15 @@ bool handle_input() {
 		    break;
 
 		case SDLK_z:
-		case SDLK_RETURN:
-		case SDLK_KP_ENTER:
-		case SDLK_SPACE:
+		case SDLK_LSHIFT:
+		case SDLK_RSHIFT:
 		    buttons[BTN_IDX_A] = 0;
 		    buttons_frame[BTN_IDX_A] = 0;
 		    break;
 
 		case SDLK_x:
+		case SDLK_LCTRL:
+		case SDLK_RCTRL:
 		    buttons[BTN_IDX_B] = 0;
 		    buttons_frame[BTN_IDX_B] = 0;
 		    break;

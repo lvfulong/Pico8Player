@@ -30,5 +30,5 @@ static color_t palette[] = {
 static uint8_t pal_map[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 const static uint8_t orig_pal_map[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 
-void _print(const char* text, const uint8_t textLen, int16_t x, int16_t y, int16_t paletteIdx);
+//void _print(const char* text, const uint8_t textLen, int16_t x, int16_t y, int16_t paletteIdx);
 #endif

@@ -21,6 +21,21 @@ with the Pico as a target, it was all implicit casting, which I hopefully got ri
 This project also gets some "inspiration" from [tac08](https://github.com/0xcafed00d/tac08/tree/master/src) - ideas for things I don't know how to solve, and the "firmware.lua" file 
 for basic implementations.
 
+## Controls (PC / SDL backend)
+
+This project follows **PICO-8 default keyboard controls** for player 1:
+
+- **btn(0)**: Left  → **←**
+- **btn(1)**: Right → **→**
+- **btn(2)**: Up    → **↑**
+- **btn(3)**: Down  → **↓**
+- **btn(4)**: **O** → **Z** or **C**
+- **btn(5)**: **X** → **X** or **V**
+
+Other keys:
+
+- **Esc** or **Q**: quit
+
 ## Demo
 
 ### In emulator (SDL/rawdraw backed)
