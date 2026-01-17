@@ -31,6 +31,14 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 project(my_project C CXX ASM)
 
+# Python：Windows 上一般是 python.exe；Linux/macOS 多为 python3
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+	set(PICO_PYTHON "${Python3_EXECUTABLE}")
+else()
+	set(PICO_PYTHON "python")
+endif()
+
 # TODO: how do i compile _a_ luac for meta-build
 if(NOT BACKEND  STREQUAL "ESP32")
 add_subdirectory(local_lua)
@@ -46,7 +54,7 @@ endif()
 file(GLOB ALL_RESOURCE_FILES CONFIGURE_DEPENDS stdlib/stdlib.lua artifacts/font.lua carts/* scripts/to_c.py)
 add_custom_command(
 	OUTPUT ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
-	COMMAND python3 scripts/to_c.py --emit-stdlib --luac $<TARGET_FILE:luac> carts/ > ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
+	COMMAND ${PICO_PYTHON} scripts/to_c.py --emit-stdlib --luac $<TARGET_FILE:luac> carts/ > ${CMAKE_SOURCE_DIR}/src/generated/static_game_data.h
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 	DEPENDS luac ${ALL_RESOURCE_FILES}
 	)
@@ -90,9 +98,43 @@ if(BACKEND STREQUAL "PC")
 		SCREEN_HEIGHT=128
 		HUD_HEIGHT=12
 	)
+
+	# 地图/资源查看器：从磁盘导入 .p8 并显示地图（PC + SDL）
+	add_executable(pico_editor
+		src/generated/static_game_data.h
+		src/pico_editor.cpp
+	)
+
+	target_link_libraries(pico_editor
+		my_lua_lib
+		SDL2::SDL2
+		SDL2::SDL2main
+		SDL2_mixer
+	)
+
+	target_include_directories(pico_editor PUBLIC
+		${CMAKE_CURRENT_SOURCE_DIR}
+		SDL
+		SDL_mixer
+	)
+
+	target_compile_definitions(pico_editor PRIVATE
+		SDL_BACKEND=1
+		W_SCREEN_HEIGHT=512
+		W_SCREEN_WIDTH=512
+		SCREEN_WIDTH=128
+		SCREEN_HEIGHT=128
+		HUD_HEIGHT=12
+	)
+
+	# Windows/MSVC 下明确按 UTF-8 读取源码，避免中文字符串导致编译报错
+	if(MSVC)
+		target_compile_options(pico_editor PRIVATE /utf-8)
+	endif()
 	# Lua 平台宏：Windows 下 luaconf.h 会基于 _WIN32 自动启用 LUA_WIN；非 Windows 则沿用 LUA_USE_LINUX
 	if(UNIX AND NOT APPLE)
 		target_compile_definitions(pc_pico PRIVATE LUA_USE_LINUX=1)
+		target_compile_definitions(pico_editor PRIVATE LUA_USE_LINUX=1)
 	endif()
 
 	# 下面这些 flags 是 GCC/Clang 特有；MSVC 下会直接报错，故仅在非 MSVC 启用
@@ -108,6 +150,7 @@ if(BACKEND STREQUAL "PC")
 
 	if(APPLE)
 		add_custom_command(TARGET pc_pico POST_BUILD COMMAND codesign -s - ./pc_pico)
+		add_custom_command(TARGET pico_editor POST_BUILD COMMAND codesign -s - ./pico_editor)
 	endif()
 
 
