@@ -52,6 +52,9 @@ pc_pico_editor/Release/pico_editor.exe carts/celeste.p8
 
 - **方向键**：滚动地图视口
 - **ESC / Q**：退出
+- **F1**：打开/关闭“关卡下拉菜单”
+  - 打开后用 **↑/↓** 选择关卡
+  - 按 **Enter** 切换并重新加载显示
 
 ### `.p8` 支持范围
 
