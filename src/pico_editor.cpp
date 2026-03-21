@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
     engine_init();
 
     // 扫描 carts 下所有 .p8，当作“关卡列表”
-    std::vector<std::string> levels = list_p8_files("carts");
+    std::vector<std::string> levels = list_p8_files("C:/Users/77533/Documents/Pico8Player/carts");
     if (levels.empty()) {
         // 兜底：仍可通过命令行路径打开
         std::printf("未找到 carts/*.p8（将只支持命令行传入 .p8 路径）\n");
