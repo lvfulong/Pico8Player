@@ -467,6 +467,13 @@ int main(int argc, char** argv) {
 
                 if (ImGui::Button("Reset")) { map_x = 0; map_y = 0; zoom_idx = 2; }
 
+                // Mouse wheel zoom when hovering over this window
+                if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
+                    float wheel = ImGui::GetIO().MouseWheel;
+                    if (wheel > 0.0f && zoom_idx < zoom_count - 1) zoom_idx++;
+                    if (wheel < 0.0f && zoom_idx > 0) zoom_idx--;
+                }
+
                 ImGui::Separator();
 
                 // Render map to frontbuffer
