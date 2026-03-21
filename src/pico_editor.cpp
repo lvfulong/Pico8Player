@@ -333,8 +333,10 @@ static void update_map_texture() {
         glBindTexture(GL_TEXTURE_2D, gMapTexture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        float border_color[] = { 0, 0, 0, 1 };
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border_color);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, MAP_TEX_W, MAP_TEX_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, map_rgba);
     } else {
         glBindTexture(GL_TEXTURE_2D, gMapTexture);
@@ -542,27 +544,25 @@ int main(int argc, char** argv) {
 
                 ImGui::Separator();
 
-                // Calculate display: full map texture scaled by zoom
+                // Calculate display
                 const float zoom_f = (float)zoom_levels[zoom_idx];
-                const float map_img_w = MAP_TEX_W * zoom_f; // full map width in display pixels
-                const float map_img_h = MAP_TEX_H * zoom_f; // full map height in display pixels
+                const float map_img_w = MAP_TEX_W * zoom_f;
+                const float map_img_h = MAP_TEX_H * zoom_f;
 
-                // Available area for the map image
                 ImVec2 avail = ImGui::GetContentRegionAvail();
                 ImVec2 cur = ImGui::GetCursorPos();
 
-                // Compute UV from map_x, map_y (in tiles, floating point offset)
-                // map_x/map_y are pixel offsets into the 1024x512 map texture
+                // UV from tile pan offset
                 float uv_x0 = (float)(map_x * 8) / MAP_TEX_W;
                 float uv_y0 = (float)(map_y * 8) / MAP_TEX_H;
                 float uv_x1 = uv_x0 + avail.x / map_img_w;
                 float uv_y1 = uv_y0 + avail.y / map_img_h;
 
-                // Display the map texture with UV-based panning
+                // Display (CLAMP_TO_BORDER fills out-of-range UVs with black)
                 ImGui::Image((ImTextureID)(intptr_t)gMapTexture, avail,
                              ImVec2(uv_x0, uv_y0), ImVec2(uv_x1, uv_y1));
 
-                // Overlay invisible button for drag interaction
+                // Overlay invisible button for drag interaction (covers full area)
                 ImGui::SetCursorPos(cur);
                 ImGui::InvisibleButton("map_drag", avail);
 
