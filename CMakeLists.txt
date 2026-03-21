@@ -76,6 +76,7 @@ if(BACKEND STREQUAL "PC")
 	add_subdirectory(SDL)
 	add_subdirectory(SDL_mixer)
 	add_subdirectory(lua)
+	add_subdirectory(pc_pico_tools)
 
 	target_link_libraries(pc_pico
 		my_lua_lib
