@@ -39,6 +39,8 @@ static SDL_Window*   gWindow   = nullptr;
 static SDL_GLContext  gGLContext = nullptr;
 static GLuint         gGameTexture = 0;
 static uint8_t        rgba_pixels[128 * 128 * 4];
+static GLuint         gMapTexture = 0;
+static uint8_t*       map_rgba = nullptr;
 
 // ─── Backend interface implementation (required by engine.c) ───
 
@@ -91,6 +93,8 @@ bool init_video() {
 }
 
 void video_close() {
+    if (gMapTexture) { glDeleteTextures(1, &gMapTexture); gMapTexture = 0; }
+    if (map_rgba) { delete[] map_rgba; map_rgba = nullptr; }
     if (gGameTexture) { glDeleteTextures(1, &gGameTexture); gGameTexture = 0; }
     if (gGLContext) { SDL_GL_DeleteContext(gGLContext); gGLContext = nullptr; }
     if (gWindow) { SDL_DestroyWindow(gWindow); gWindow = nullptr; }
@@ -277,6 +281,67 @@ static bool load_p8_file(const std::string& path) {
     return true;
 }
 
+// ─── Map to RGBA texture (bypasses 128x128 frontbuffer) ───
+// Full map is 128x64 tiles, each 8x8 pixels = 1024x512 pixels max
+static const int MAP_TEX_W = 128 * 8; // 1024
+static const int MAP_TEX_H = 64 * 8;  // 512
+
+static inline void color_to_rgba(color_t c, uint8_t* out) {
+    out[0] = (uint8_t)((c >> 11) << 3);
+    out[1] = (uint8_t)(((c >> 5) & 0x3f) << 2);
+    out[2] = (uint8_t)((c & 0x1f) << 3);
+    out[3] = 255;
+}
+
+// Render full map to map_rgba buffer at 1:1 (1 pixel per sprite pixel)
+static void update_map_texture() {
+    if (!map_rgba) {
+        map_rgba = new uint8_t[MAP_TEX_W * MAP_TEX_H * 4];
+    }
+    // Clear to background color (color 0)
+    color_t bg = palette[0];
+    uint8_t bg_rgba[4];
+    color_to_rgba(bg, bg_rgba);
+    for (int i = 0; i < MAP_TEX_W * MAP_TEX_H; i++) {
+        memcpy(map_rgba + i * 4, bg_rgba, 4);
+    }
+
+    // Draw each map tile
+    for (int ty = 0; ty < 64; ty++) {
+        for (int tx = 0; tx < 128; tx++) {
+            uint8_t spr = map_data[tx + ty * 128];
+            if (spr == 0) continue;
+            // Sprite position in spritesheet: 16 sprites per row, each 8x8
+            int sx0 = (spr % 16) * 8;
+            int sy0 = (spr / 16) * 8;
+            int px0 = tx * 8;
+            int py0 = ty * 8;
+            for (int py = 0; py < 8; py++) {
+                for (int px = 0; px < 8; px++) {
+                    palidx_t idx = spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)];
+                    if (idx == 0) continue; // transparent
+                    color_t c = palette[idx];
+                    int off = ((py0 + py) * MAP_TEX_W + (px0 + px)) * 4;
+                    color_to_rgba(c, map_rgba + off);
+                }
+            }
+        }
+    }
+
+    if (!gMapTexture) {
+        glGenTextures(1, &gMapTexture);
+        glBindTexture(GL_TEXTURE_2D, gMapTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, MAP_TEX_W, MAP_TEX_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, map_rgba);
+    } else {
+        glBindTexture(GL_TEXTURE_2D, gMapTexture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, MAP_TEX_W, MAP_TEX_H, GL_RGBA, GL_UNSIGNED_BYTE, map_rgba);
+    }
+}
+
 // ─── Spritesheet to RGBA texture ───
 static GLuint gSpritesheetTexture = 0;
 static uint8_t spritesheet_rgba[128 * 128 * 4];
@@ -346,6 +411,7 @@ int main(int argc, char** argv) {
         if (load_p8_file(current_file)) {
             file_loaded = true;
             update_spritesheet_texture();
+            update_map_texture();
         }
     } else if (!levels.empty()) {
         current_level = 0;
@@ -353,6 +419,7 @@ int main(int argc, char** argv) {
         if (load_p8_file(current_file)) {
             file_loaded = true;
             update_spritesheet_texture();
+            update_map_texture();
         }
     }
 
@@ -360,14 +427,18 @@ int main(int argc, char** argv) {
     int map_x = 0, map_y = 0;
     float map_drag_accum_x = 0.0f, map_drag_accum_y = 0.0f;
     static const z8::fix32 zoom_levels[] = {
+        z8::fix32(1) / 16, // 0.5px
+        z8::fix32(1) / 8,  // 1px
         z8::fix32(1) / 4,  // 2px
         z8::fix32(1) / 2,  // 4px
         z8::fix32(1),      // 8px  (default)
         z8::fix32(2),      // 16px
         z8::fix32(4),      // 32px
+        z8::fix32(8),      // 64px
+        z8::fix32(16),     // 128px
     };
     const int zoom_count = (int)(sizeof(zoom_levels) / sizeof(zoom_levels[0]));
-    int zoom_idx = 2;
+    int zoom_idx = 4;
 
     // File browser state
     std::string browse_dir = carts_dir;
@@ -444,6 +515,7 @@ int main(int argc, char** argv) {
                             map_x = 0;
                             map_y = 0;
                             update_spritesheet_texture();
+                            update_map_texture();
                         }
                     }
                 }
@@ -455,22 +527,11 @@ int main(int argc, char** argv) {
         // ─── Map View ───
         if (show_map) {
             ImGui::Begin("Map View", &show_map);
-            if (file_loaded) {
-                // Compute tile metrics first (needed by sliders and rendering)
-                const z8::fix32 zoom = zoom_levels[zoom_idx];
-                const int tile_px = z8::fix32::ceil(8 * zoom);
-                const int tiles_w = MAX(1, MIN(128, SCREEN_WIDTH / tile_px));
-                const int tiles_h = MAX(1, MIN(64, SCREEN_HEIGHT / tile_px));
-
-                // Controls
-                ImGui::SliderInt("Map X", &map_x, -tiles_w, 127);
-                ImGui::SameLine();
-                ImGui::SliderInt("Map Y", &map_y, -tiles_h, 63);
-
-                const char* zoom_labels[] = { "x0.25 (2px)", "x0.5 (4px)", "x1 (8px)", "x2 (16px)", "x4 (32px)" };
+            if (file_loaded && gMapTexture) {
+                // Zoom controls
+                const char* zoom_labels[] = { "x1/16", "x1/8", "x0.25", "x0.5", "x1", "x2", "x4", "x8", "x16" };
                 ImGui::SliderInt("Zoom", &zoom_idx, 0, zoom_count - 1, zoom_labels[zoom_idx]);
-
-                if (ImGui::Button("Reset")) { map_x = 0; map_y = 0; zoom_idx = 2; }
+                if (ImGui::Button("Reset")) { map_x = 0; map_y = 0; zoom_idx = 4; }
 
                 // Mouse wheel zoom when hovering over this window
                 if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
@@ -480,40 +541,47 @@ int main(int argc, char** argv) {
                 }
 
                 ImGui::Separator();
-                gfx_cls(0);
-                draw_map_view_scaled(map_x, map_y, 0, 0, tiles_w, tiles_h, zoom);
-                gfx_flip(); // uploads to gGameTexture
 
-                // Display in ImGui, centered in remaining area
+                // Calculate display: full map texture scaled by zoom
+                const float zoom_f = (float)zoom_levels[zoom_idx];
+                const float map_img_w = MAP_TEX_W * zoom_f; // full map width in display pixels
+                const float map_img_h = MAP_TEX_H * zoom_f; // full map height in display pixels
+
+                // Available area for the map image
                 ImVec2 avail = ImGui::GetContentRegionAvail();
-                float scale = std::min(avail.x / 128.0f, avail.y / 128.0f);
-                if (scale < 1.0f) scale = 1.0f;
-                ImVec2 img_size(128 * scale, 128 * scale);
                 ImVec2 cur = ImGui::GetCursorPos();
-                float pad_x = (avail.x - img_size.x) * 0.5f;
-                float pad_y = (avail.y - img_size.y) * 0.5f;
-                ImVec2 img_pos(cur.x + (pad_x > 0 ? pad_x : 0), cur.y + (pad_y > 0 ? pad_y : 0));
-                ImGui::SetCursorPos(img_pos);
-                ImGui::Image((ImTextureID)(intptr_t)gGameTexture, img_size);
-                // Overlay invisible button for drag interaction
-                ImGui::SetCursorPos(img_pos);
-                ImGui::InvisibleButton("map_drag", img_size);
 
-                // Mouse drag to pan map
+                // Compute UV from map_x, map_y (in tiles, floating point offset)
+                // map_x/map_y are pixel offsets into the 1024x512 map texture
+                float uv_x0 = (float)(map_x * 8) / MAP_TEX_W;
+                float uv_y0 = (float)(map_y * 8) / MAP_TEX_H;
+                float uv_x1 = uv_x0 + avail.x / map_img_w;
+                float uv_y1 = uv_y0 + avail.y / map_img_h;
+
+                // Display the map texture with UV-based panning
+                ImGui::Image((ImTextureID)(intptr_t)gMapTexture, avail,
+                             ImVec2(uv_x0, uv_y0), ImVec2(uv_x1, uv_y1));
+
+                // Overlay invisible button for drag interaction
+                ImGui::SetCursorPos(cur);
+                ImGui::InvisibleButton("map_drag", avail);
+
+                // Mouse drag to pan map (sub-tile smooth panning via float offsets)
                 if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                     ImVec2 delta = ImGui::GetIO().MouseDelta;
-                    float pixels_per_tile = scale * (float)tile_px;
+                    // Convert screen pixels to tile offset
+                    float tile_screen_px = 8.0f * zoom_f;
                     map_drag_accum_x -= delta.x;
                     map_drag_accum_y -= delta.y;
-                    if (fabsf(map_drag_accum_x) >= pixels_per_tile) {
-                        int step = (int)(map_drag_accum_x / pixels_per_tile);
+                    if (fabsf(map_drag_accum_x) >= tile_screen_px) {
+                        int step = (int)(map_drag_accum_x / tile_screen_px);
                         map_x += step;
-                        map_drag_accum_x -= step * pixels_per_tile;
+                        map_drag_accum_x -= step * tile_screen_px;
                     }
-                    if (fabsf(map_drag_accum_y) >= pixels_per_tile) {
-                        int step = (int)(map_drag_accum_y / pixels_per_tile);
+                    if (fabsf(map_drag_accum_y) >= tile_screen_px) {
+                        int step = (int)(map_drag_accum_y / tile_screen_px);
                         map_y += step;
-                        map_drag_accum_y -= step * pixels_per_tile;
+                        map_drag_accum_y -= step * tile_screen_px;
                     }
                 } else {
                     map_drag_accum_x = 0.0f;
