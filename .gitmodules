@@ -19,3 +19,6 @@
 [submodule "cnfa"]
 	path = cnfa
 	url = https://github.com/davidventura/cnfa.git
+[submodule "imgui"]
+	path = imgui
+	url = https://github.com/ocornut/imgui.git

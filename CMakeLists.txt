@@ -100,10 +100,21 @@ if(BACKEND STREQUAL "PC")
 		HUD_HEIGHT=12
 	)
 
-	# 地图/资源查看器：从磁盘导入 .p8 并显示地图（PC + SDL）
+	# 地图/资源查看器：从磁盘导入 .p8 并显示地图（PC + SDL + Dear ImGui）
+	find_package(OpenGL REQUIRED)
+
 	add_executable(pico_editor
 		src/generated/static_game_data.h
 		src/pico_editor.cpp
+		# Dear ImGui core
+		imgui/imgui.cpp
+		imgui/imgui_demo.cpp
+		imgui/imgui_draw.cpp
+		imgui/imgui_tables.cpp
+		imgui/imgui_widgets.cpp
+		# Dear ImGui backends
+		imgui/backends/imgui_impl_sdl2.cpp
+		imgui/backends/imgui_impl_opengl3.cpp
 	)
 
 	target_link_libraries(pico_editor
@@ -111,18 +122,22 @@ if(BACKEND STREQUAL "PC")
 		SDL2::SDL2
 		SDL2::SDL2main
 		SDL2_mixer
+		OpenGL::GL
 	)
 
 	target_include_directories(pico_editor PUBLIC
 		${CMAKE_CURRENT_SOURCE_DIR}
+		${CMAKE_CURRENT_SOURCE_DIR}/imgui
+		${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
 		SDL
 		SDL_mixer
 	)
 
 	target_compile_definitions(pico_editor PRIVATE
 		SDL_BACKEND=1
-		W_SCREEN_HEIGHT=512
-		W_SCREEN_WIDTH=1024
+		IMGUI_BACKEND=1
+		W_SCREEN_HEIGHT=720
+		W_SCREEN_WIDTH=1280
 		SCREEN_WIDTH=128
 		SCREEN_HEIGHT=128
 		HUD_HEIGHT=12
@@ -132,6 +147,28 @@ if(BACKEND STREQUAL "PC")
 	if(MSVC)
 		target_compile_options(pico_editor PRIVATE /utf-8)
 	endif()
+
+	# 构建后自动把 SDL2.dll / SDL2_mixer.dll 复制到 exe 目录，避免运行时找不到 DLL
+	add_custom_command(TARGET pico_editor POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:SDL2::SDL2>
+			$<TARGET_FILE_DIR:pico_editor>
+	)
+	add_custom_command(TARGET pico_editor POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:SDL2_mixer>
+			$<TARGET_FILE_DIR:pico_editor>
+	)
+	add_custom_command(TARGET pc_pico POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:SDL2::SDL2>
+			$<TARGET_FILE_DIR:pc_pico>
+	)
+	add_custom_command(TARGET pc_pico POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:SDL2_mixer>
+			$<TARGET_FILE_DIR:pc_pico>
+	)
 	# Lua 平台宏：Windows 下 luaconf.h 会基于 _WIN32 自动启用 LUA_WIN；非 Windows 则沿用 LUA_USE_LINUX
 	if(UNIX AND NOT APPLE)
 		target_compile_definitions(pc_pico PRIVATE LUA_USE_LINUX=1)
