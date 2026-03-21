@@ -27,6 +27,6 @@ fp-info-cache
 *-backups/
 
 build-*
-pc_pico
-pc_pico_editor
+pc_pico_build
+pc_pico_editor_build
 pc_pico_tools_build

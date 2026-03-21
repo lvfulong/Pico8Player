@@ -7,7 +7,7 @@ git submodule sync --recursive
 git submodule update --init --recursive --force
 
 # out-of-source build（单独给编辑器一个构建目录）
-mkdir -p pc_pico_editor
-cmake -S . -B pc_pico_editor -DBACKEND=PC
-cmake --build pc_pico_editor --target pico_editor --config Release -j 8
+mkdir -p pc_pico_editor_build
+cmake -S . -B pc_pico_editor_build -DBACKEND=PC
+cmake --build pc_pico_editor_build --target pico_editor --config Release -j 8
 

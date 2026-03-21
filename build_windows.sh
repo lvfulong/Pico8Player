@@ -11,6 +11,6 @@ git submodule sync --recursive
 git submodule update --init --recursive --force
 
 # out-of-source build
-mkdir -p pc_pico
-cmake -S . -B pc_pico -DBACKEND=PC
-cmake --build pc_pico --config Release -j 8
+mkdir -p pc_pico_build
+cmake -S . -B pc_pico_build -DBACKEND=PC
+cmake --build pc_pico_build --config Release -j 8
