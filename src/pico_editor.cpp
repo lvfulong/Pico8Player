@@ -360,6 +360,7 @@ int main(int argc, char** argv) {
 
     // Map view state
     int map_x = 0, map_y = 0;
+    float map_drag_accum_x = 0.0f, map_drag_accum_y = 0.0f;
     static const z8::fix32 zoom_levels[] = {
         z8::fix32(1) / 4,  // 2px
         z8::fix32(1) / 2,  // 4px
@@ -488,11 +489,43 @@ int main(int argc, char** argv) {
                 draw_map_view_scaled(map_x, map_y, 0, 0, tiles_w, tiles_h, zoom);
                 gfx_flip(); // uploads to gGameTexture
 
-                // Display in ImGui
+                // Display in ImGui, centered in remaining area
                 ImVec2 avail = ImGui::GetContentRegionAvail();
                 float scale = std::min(avail.x / 128.0f, avail.y / 128.0f);
                 if (scale < 1.0f) scale = 1.0f;
-                ImGui::Image((ImTextureID)(intptr_t)gGameTexture, ImVec2(128 * scale, 128 * scale));
+                ImVec2 img_size(128 * scale, 128 * scale);
+                ImVec2 cur = ImGui::GetCursorPos();
+                float pad_x = (avail.x - img_size.x) * 0.5f;
+                float pad_y = (avail.y - img_size.y) * 0.5f;
+                ImVec2 img_pos(cur.x + (pad_x > 0 ? pad_x : 0), cur.y + (pad_y > 0 ? pad_y : 0));
+                ImGui::SetCursorPos(img_pos);
+                ImGui::Image((ImTextureID)(intptr_t)gGameTexture, img_size);
+                // Overlay invisible button for drag interaction
+                ImGui::SetCursorPos(img_pos);
+                ImGui::InvisibleButton("map_drag", img_size);
+
+                // Mouse drag to pan map
+                if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                    ImVec2 delta = ImGui::GetIO().MouseDelta;
+                    float pixels_per_tile = scale * (float)tile_px;
+                    map_drag_accum_x -= delta.x;
+                    map_drag_accum_y -= delta.y;
+                    if (fabsf(map_drag_accum_x) >= pixels_per_tile) {
+                        int step = (int)(map_drag_accum_x / pixels_per_tile);
+                        map_x += step;
+                        map_drag_accum_x -= step * pixels_per_tile;
+                    }
+                    if (fabsf(map_drag_accum_y) >= pixels_per_tile) {
+                        int step = (int)(map_drag_accum_y / pixels_per_tile);
+                        map_y += step;
+                        map_drag_accum_y -= step * pixels_per_tile;
+                    }
+                    map_x = MAX(0, MIN(map_x, MAX(0, 128 - tiles_w)));
+                    map_y = MAX(0, MIN(map_y, MAX(0, 64 - tiles_h)));
+                } else {
+                    map_drag_accum_x = 0.0f;
+                    map_drag_accum_y = 0.0f;
+                }
             } else {
                 ImGui::TextWrapped("No cartridge loaded. Select a .p8 file from the Cartridge Files panel.");
             }
