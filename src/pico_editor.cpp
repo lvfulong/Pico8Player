@@ -190,8 +190,6 @@ static std::string filename_only(const std::string& p) {
 
 static void draw_map_view_scaled(int map_x, int map_y, int screen_x, int screen_y,
                                   int tiles_w, int tiles_h, z8::fix32 scale) {
-    map_x = MAX(0, MIN(map_x, 127));
-    map_y = MAX(0, MIN(map_y, 63));
     tiles_w = MAX(1, MIN(tiles_w, 128));
     tiles_h = MAX(1, MIN(tiles_h, 64));
     const int tile_px = z8::fix32::ceil(8 * scale);
@@ -458,10 +456,16 @@ int main(int argc, char** argv) {
         if (show_map) {
             ImGui::Begin("Map View", &show_map);
             if (file_loaded) {
+                // Compute tile metrics first (needed by sliders and rendering)
+                const z8::fix32 zoom = zoom_levels[zoom_idx];
+                const int tile_px = z8::fix32::ceil(8 * zoom);
+                const int tiles_w = MAX(1, MIN(128, SCREEN_WIDTH / tile_px));
+                const int tiles_h = MAX(1, MIN(64, SCREEN_HEIGHT / tile_px));
+
                 // Controls
-                ImGui::SliderInt("Map X", &map_x, 0, 127);
+                ImGui::SliderInt("Map X", &map_x, -tiles_w, 127);
                 ImGui::SameLine();
-                ImGui::SliderInt("Map Y", &map_y, 0, 63);
+                ImGui::SliderInt("Map Y", &map_y, -tiles_h, 63);
 
                 const char* zoom_labels[] = { "x0.25 (2px)", "x0.5 (4px)", "x1 (8px)", "x2 (16px)", "x4 (32px)" };
                 ImGui::SliderInt("Zoom", &zoom_idx, 0, zoom_count - 1, zoom_labels[zoom_idx]);
@@ -476,15 +480,6 @@ int main(int argc, char** argv) {
                 }
 
                 ImGui::Separator();
-
-                // Render map to frontbuffer
-                const z8::fix32 zoom = zoom_levels[zoom_idx];
-                const int tile_px = z8::fix32::ceil(8 * zoom);
-                const int tiles_w = MAX(1, MIN(128, SCREEN_WIDTH / tile_px));
-                const int tiles_h = MAX(1, MIN(64, SCREEN_HEIGHT / tile_px));
-                map_x = MAX(0, MIN(map_x, MAX(0, 128 - tiles_w)));
-                map_y = MAX(0, MIN(map_y, MAX(0, 64 - tiles_h)));
-
                 gfx_cls(0);
                 draw_map_view_scaled(map_x, map_y, 0, 0, tiles_w, tiles_h, zoom);
                 gfx_flip(); // uploads to gGameTexture
@@ -520,8 +515,6 @@ int main(int argc, char** argv) {
                         map_y += step;
                         map_drag_accum_y -= step * pixels_per_tile;
                     }
-                    map_x = MAX(0, MIN(map_x, MAX(0, 128 - tiles_w)));
-                    map_y = MAX(0, MIN(map_y, MAX(0, 64 - tiles_h)));
                 } else {
                     map_drag_accum_x = 0.0f;
                     map_drag_accum_y = 0.0f;
