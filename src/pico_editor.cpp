@@ -42,6 +42,22 @@ static uint8_t        rgba_pixels[128 * 128 * 4];
 static GLuint         gMapTexture = 0;
 static uint8_t*       map_rgba = nullptr;
 
+// ─── PICO-8 palette (RGB888) ───
+static const uint8_t pico8_palette[16][3] = {
+    {  0,   0,   0}, { 29,  43,  83}, {126,  37,  83}, {  0, 135,  81},
+    {171,  82,  54}, { 95,  87,  79}, {194, 195, 199}, {255, 241, 232},
+    {255,   0,  77}, {255, 163,   0}, {255, 236,  39}, {  0, 228,  54},
+    { 41, 173, 255}, {131, 118, 156}, {255, 119, 168}, {255, 204, 170},
+};
+
+// ─── Editor state ───
+static int selected_sprite = 1;       // Currently selected sprite for map painting
+static int selected_color = 7;        // Currently selected color for sprite editing
+static bool show_sprite_editor = true;
+static bool map_paint_mode = false;    // When true, clicking on map places tiles
+static bool sprite_modified = false;   // Track if spritesheet was modified
+static bool map_modified = false;      // Track if map was modified
+
 // ─── Backend interface implementation (required by engine.c) ───
 
 bool init_platform() { return true; }
@@ -281,6 +297,115 @@ static bool load_p8_file(const std::string& path) {
     return true;
 }
 
+// ─── Save .p8 file ───
+// Reads the original file, replaces __gfx__, __map__, __gff__ sections, writes back
+static bool save_p8_file(const std::string& path) {
+    // Read original file to preserve __lua__, __sfx__, __music__, __label__ etc.
+    std::ifstream in(path, std::ios::in);
+    std::vector<std::string> lines;
+    if (in.good()) {
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+        in.close();
+    }
+
+    // Build output: copy lines, replacing gfx/map/gff sections
+    std::ofstream out(path, std::ios::out);
+    if (!out.good()) {
+        printf("Cannot write: %s\n", path.c_str());
+        return false;
+    }
+
+    enum class Section { None, Gfx, Map, Gff };
+    Section sec = Section::None;
+    bool gfx_written = false, map_written = false, gff_written = false;
+
+    auto write_gfx = [&]() {
+        out << "__gfx__\n";
+        for (int y = 0; y < 128; y++) {
+            for (int x = 0; x < 128; x++) {
+                out << std::hex << (int)spritesheet.sprite_data[y * 128 + x];
+            }
+            out << "\n";
+        }
+        gfx_written = true;
+    };
+
+    auto write_map = [&]() {
+        out << "__map__\n";
+        for (int y = 0; y < 64; y++) {
+            for (int x = 0; x < 128; x++) {
+                uint8_t v = map_data[y * 128 + x];
+                out << std::hex << (int)(v >> 4) << (int)(v & 0xf);
+            }
+            out << "\n";
+        }
+        map_written = true;
+    };
+
+    auto write_gff = [&]() {
+        out << "__gff__\n";
+        for (int row = 0; row < 2; row++) {
+            for (int i = 0; i < 128; i++) {
+                uint8_t v = spritesheet.flags[row * 128 + i];
+                out << std::hex << (int)(v >> 4) << (int)(v & 0xf);
+            }
+            out << "\n";
+        }
+        gff_written = true;
+    };
+
+    if (lines.empty()) {
+        // New file from scratch
+        out << "pico-8 cartridge // http://www.pico-8.com\n";
+        out << "version 42\n";
+        out << "__lua__\n\n";
+        write_gfx();
+        write_map();
+        write_gff();
+        out << "__sfx__\n";
+        out << "__music__\n";
+    } else {
+        for (size_t i = 0; i < lines.size(); i++) {
+            const std::string& line = lines[i];
+            if (line == "__gfx__") {
+                write_gfx();
+                sec = Section::Gfx;
+                continue;
+            } else if (line == "__map__") {
+                write_map();
+                sec = Section::Map;
+                continue;
+            } else if (line == "__gff__") {
+                write_gff();
+                sec = Section::Gff;
+                continue;
+            } else if (line.rfind("__", 0) == 0) {
+                sec = Section::None;
+            }
+
+            // Skip old content of replaced sections
+            if (sec == Section::Gfx || sec == Section::Map || sec == Section::Gff) continue;
+
+            out << line << "\n";
+        }
+
+        // Append sections that didn't exist in the original file
+        if (!gfx_written) write_gfx();
+        if (!map_written) write_map();
+        if (!gff_written) write_gff();
+    }
+
+    out.close();
+    sprite_modified = false;
+    map_modified = false;
+    printf("Saved: %s\n", path.c_str());
+    return true;
+}
+
 // ─── Map to RGBA texture (bypasses 128x128 frontbuffer) ───
 // Full map is 128x64 tiles, each 8x8 pixels = 1024x512 pixels max
 static const int MAP_TEX_W = 128 * 8; // 1024
@@ -448,6 +573,7 @@ int main(int argc, char** argv) {
     bool show_map = true;
     bool show_files = true;
     bool show_info = true;
+    bool show_sprite_editor_win = true;
 
     bool done = false;
     while (!done) {
@@ -466,21 +592,96 @@ int main(int argc, char** argv) {
         // ─── Menu Bar ───
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Open Directory...")) {
-                    // Simple: let user type a path
+                if (ImGui::MenuItem("New Cartridge", "Ctrl+N")) {
+                    memset(spritesheet.sprite_data, 0, sizeof(spritesheet.sprite_data));
+                    memset(spritesheet.flags, 0, sizeof(spritesheet.flags));
+                    memset(map_data, 0, sizeof(map_data));
+                    current_file = "";
+                    current_level = -1;
+                    file_loaded = true;
+                    sprite_modified = false;
+                    map_modified = false;
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
+                if (ImGui::MenuItem("Save", "Ctrl+S", false, file_loaded && !current_file.empty())) {
+                    save_p8_file(current_file);
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
+                if (ImGui::MenuItem("Save As...", nullptr, false, file_loaded)) {
+                    // Will use a simple input popup
+                    ImGui::OpenPopup("SaveAsPopup");
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "ESC")) done = true;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Edit")) {
+                if (ImGui::MenuItem("Clear Map", nullptr, false, file_loaded)) {
+                    memset(map_data, 0, sizeof(map_data));
+                    map_modified = true;
+                    update_map_texture();
+                }
+                if (ImGui::MenuItem("Clear Spritesheet", nullptr, false, file_loaded)) {
+                    memset(spritesheet.sprite_data, 0, sizeof(spritesheet.sprite_data));
+                    memset(spritesheet.flags, 0, sizeof(spritesheet.flags));
+                    sprite_modified = true;
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View")) {
                 ImGui::MenuItem("Cartridge Files", nullptr, &show_files);
                 ImGui::MenuItem("Map View", nullptr, &show_map);
                 ImGui::MenuItem("Spritesheet", nullptr, &show_spritesheet);
+                ImGui::MenuItem("Sprite Editor", nullptr, &show_sprite_editor_win);
                 ImGui::MenuItem("Info", nullptr, &show_info);
                 ImGui::EndMenu();
             }
             ImGui::EndMainMenuBar();
+        }
+
+        // ─── Save As Popup ───
+        if (ImGui::BeginPopupModal("SaveAsPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            static char save_path[512] = "";
+            ImGui::Text("Enter file path (.p8):");
+            ImGui::InputText("##savepath", save_path, sizeof(save_path));
+            if (ImGui::Button("Save")) {
+                std::string sp(save_path);
+                if (!sp.empty()) {
+                    if (sp.find(".p8") == std::string::npos) sp += ".p8";
+                    if (save_p8_file(sp)) {
+                        current_file = sp;
+                        file_loaded = true;
+                        levels = list_p8_files(browse_dir);
+                    }
+                }
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        // ─── Keyboard shortcuts ───
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S) && file_loaded && !current_file.empty()) {
+            save_p8_file(current_file);
+            update_spritesheet_texture();
+            update_map_texture();
+        }
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N)) {
+            memset(spritesheet.sprite_data, 0, sizeof(spritesheet.sprite_data));
+            memset(spritesheet.flags, 0, sizeof(spritesheet.flags));
+            memset(map_data, 0, sizeof(map_data));
+            current_file = "";
+            current_level = -1;
+            file_loaded = true;
+            sprite_modified = false;
+            map_modified = false;
+            update_spritesheet_texture();
+            update_map_texture();
         }
 
         // ─── Cartridge Files Panel ───
@@ -530,10 +731,17 @@ int main(int argc, char** argv) {
         if (show_map) {
             ImGui::Begin("Map View", &show_map);
             if (file_loaded && gMapTexture) {
+                // Toolbar
+                ImGui::Checkbox("Paint Mode", &map_paint_mode);
+                ImGui::SameLine();
+                ImGui::Text("Sprite: %d", selected_sprite);
+                ImGui::SameLine();
                 // Zoom controls
                 const char* zoom_labels[] = { "x1/16", "x1/8", "x0.25", "x0.5", "x1", "x2", "x4", "x8", "x16" };
                 ImGui::SliderInt("Zoom", &zoom_idx, 0, zoom_count - 1, zoom_labels[zoom_idx]);
-                if (ImGui::Button("Reset")) { map_x = 0; map_y = 0; zoom_idx = 4; }
+                if (ImGui::Button("Reset View")) { map_x = 0; map_y = 0; zoom_idx = 4; }
+                ImGui::SameLine();
+                if (ImGui::Button("Erase Mode")) { selected_sprite = 0; }
 
                 // Mouse wheel zoom when hovering over this window
                 if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
@@ -551,6 +759,7 @@ int main(int argc, char** argv) {
 
                 ImVec2 avail = ImGui::GetContentRegionAvail();
                 ImVec2 cur = ImGui::GetCursorPos();
+                ImVec2 screen_pos = ImGui::GetCursorScreenPos();
 
                 // UV from tile pan offset
                 float uv_x0 = (float)(map_x * 8) / MAP_TEX_W;
@@ -562,47 +771,271 @@ int main(int argc, char** argv) {
                 ImGui::Image((ImTextureID)(intptr_t)gMapTexture, avail,
                              ImVec2(uv_x0, uv_y0), ImVec2(uv_x1, uv_y1));
 
-                // Overlay invisible button for drag interaction (covers full area)
+                // Overlay invisible button for interaction (covers full area)
                 ImGui::SetCursorPos(cur);
                 ImGui::InvisibleButton("map_drag", avail);
 
-                // Mouse drag to pan map (sub-tile smooth panning via float offsets)
-                if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                    ImVec2 delta = ImGui::GetIO().MouseDelta;
-                    // Convert screen pixels to tile offset
-                    float tile_screen_px = 8.0f * zoom_f;
-                    map_drag_accum_x -= delta.x;
-                    map_drag_accum_y -= delta.y;
-                    if (fabsf(map_drag_accum_x) >= tile_screen_px) {
-                        int step = (int)(map_drag_accum_x / tile_screen_px);
-                        map_x += step;
-                        map_drag_accum_x -= step * tile_screen_px;
-                    }
-                    if (fabsf(map_drag_accum_y) >= tile_screen_px) {
-                        int step = (int)(map_drag_accum_y / tile_screen_px);
-                        map_y += step;
-                        map_drag_accum_y -= step * tile_screen_px;
+                if (map_paint_mode) {
+                    // Paint mode: left click to place tile
+                    if (ImGui::IsItemHovered()) {
+                        ImVec2 mouse = ImGui::GetIO().MousePos;
+                        float rel_x = mouse.x - screen_pos.x;
+                        float rel_y = mouse.y - screen_pos.y;
+                        float tile_px = 8.0f * zoom_f;
+                        int tile_x = map_x + (int)(rel_x / tile_px);
+                        int tile_y = map_y + (int)(rel_y / tile_px);
+
+                        // Show hover info
+                        ImGui::SetTooltip("Tile (%d, %d) = %d", tile_x, tile_y,
+                            (tile_x >= 0 && tile_x < 128 && tile_y >= 0 && tile_y < 64) ? map_data[tile_y * 128 + tile_x] : -1);
+
+                        // Draw highlight on hovered tile
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        float hx = screen_pos.x + (tile_x - map_x) * tile_px;
+                        float hy = screen_pos.y + (tile_y - map_y) * tile_px;
+                        dl->AddRect(ImVec2(hx, hy), ImVec2(hx + tile_px, hy + tile_px), IM_COL32(255, 255, 0, 200), 0, 0, 2.0f);
+
+                        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                            if (tile_x >= 0 && tile_x < 128 && tile_y >= 0 && tile_y < 64) {
+                                map_data[tile_y * 128 + tile_x] = (uint8_t)selected_sprite;
+                                map_modified = true;
+                                update_map_texture();
+                            }
+                        }
+                        // Right click to pick tile (eyedropper)
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                            if (tile_x >= 0 && tile_x < 128 && tile_y >= 0 && tile_y < 64) {
+                                selected_sprite = map_data[tile_y * 128 + tile_x];
+                            }
+                        }
                     }
                 } else {
-                    map_drag_accum_x = 0.0f;
-                    map_drag_accum_y = 0.0f;
+                    // Drag mode: pan map
+                    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                        ImVec2 delta = ImGui::GetIO().MouseDelta;
+                        float tile_screen_px = 8.0f * zoom_f;
+                        map_drag_accum_x -= delta.x;
+                        map_drag_accum_y -= delta.y;
+                        if (fabsf(map_drag_accum_x) >= tile_screen_px) {
+                            int step = (int)(map_drag_accum_x / tile_screen_px);
+                            map_x += step;
+                            map_drag_accum_x -= step * tile_screen_px;
+                        }
+                        if (fabsf(map_drag_accum_y) >= tile_screen_px) {
+                            int step = (int)(map_drag_accum_y / tile_screen_px);
+                            map_y += step;
+                            map_drag_accum_y -= step * tile_screen_px;
+                        }
+                    } else {
+                        map_drag_accum_x = 0.0f;
+                        map_drag_accum_y = 0.0f;
+                    }
                 }
             } else {
-                ImGui::TextWrapped("No cartridge loaded. Select a .p8 file from the Cartridge Files panel.");
+                ImGui::TextWrapped("No cartridge loaded. Select a .p8 file or use File > New Cartridge.");
             }
             ImGui::End();
         }
 
-        // ─── Spritesheet View ───
+        // ─── Spritesheet View (click to select sprite) ───
         if (show_spritesheet) {
             ImGui::Begin("Spritesheet", &show_spritesheet);
             if (file_loaded && gSpritesheetTexture) {
+                ImGui::Text("Selected: %d (%d,%d)", selected_sprite, selected_sprite % 16, selected_sprite / 16);
+                ImGui::SameLine();
+                if (ImGui::Button("Clear Sprite")) {
+                    int sx0 = (selected_sprite % 16) * 8;
+                    int sy0 = (selected_sprite / 16) * 8;
+                    for (int py = 0; py < 8; py++)
+                        for (int px = 0; px < 8; px++)
+                            spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)] = 0;
+                    sprite_modified = true;
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
+
                 ImVec2 avail = ImGui::GetContentRegionAvail();
-                float scale = std::min(avail.x / 128.0f, avail.y / 128.0f);
+                float scale = std::min(avail.x / 128.0f, (avail.y - 4.0f) / 128.0f);
                 if (scale < 1.0f) scale = 1.0f;
-                ImGui::Image((ImTextureID)(intptr_t)gSpritesheetTexture, ImVec2(128 * scale, 128 * scale));
+                float img_w = 128 * scale;
+                float img_h = 128 * scale;
+
+                ImVec2 img_pos = ImGui::GetCursorScreenPos();
+                ImGui::Image((ImTextureID)(intptr_t)gSpritesheetTexture, ImVec2(img_w, img_h));
+
+                // Click to select sprite
+                if (ImGui::IsItemHovered()) {
+                    ImVec2 mouse = ImGui::GetIO().MousePos;
+                    float rel_x = mouse.x - img_pos.x;
+                    float rel_y = mouse.y - img_pos.y;
+                    int sx = (int)(rel_x / (8.0f * scale));
+                    int sy = (int)(rel_y / (8.0f * scale));
+                    if (sx >= 0 && sx < 16 && sy >= 0 && sy < 16) {
+                        int hover_spr = sy * 16 + sx;
+                        ImGui::SetTooltip("Sprite %d", hover_spr);
+
+                        // Highlight hovered sprite
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        float hx = img_pos.x + sx * 8.0f * scale;
+                        float hy = img_pos.y + sy * 8.0f * scale;
+                        dl->AddRect(ImVec2(hx, hy), ImVec2(hx + 8.0f * scale, hy + 8.0f * scale),
+                                    IM_COL32(255, 255, 0, 200), 0, 0, 2.0f);
+
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                            selected_sprite = hover_spr;
+                        }
+                    }
+                }
+
+                // Highlight selected sprite
+                {
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    int sx = selected_sprite % 16;
+                    int sy = selected_sprite / 16;
+                    float hx = img_pos.x + sx * 8.0f * scale;
+                    float hy = img_pos.y + sy * 8.0f * scale;
+                    dl->AddRect(ImVec2(hx, hy), ImVec2(hx + 8.0f * scale, hy + 8.0f * scale),
+                                IM_COL32(255, 0, 0, 255), 0, 0, 2.0f);
+                }
             } else {
                 ImGui::TextWrapped("No spritesheet loaded.");
+            }
+            ImGui::End();
+        }
+
+        // ─── Sprite Editor (pixel-level editing) ───
+        if (show_sprite_editor_win) {
+            ImGui::Begin("Sprite Editor", &show_sprite_editor_win);
+            if (file_loaded) {
+                ImGui::Text("Editing Sprite %d", selected_sprite);
+                ImGui::SameLine();
+                if (ImGui::Button("Clear##spr_clear")) {
+                    int sx0 = (selected_sprite % 16) * 8;
+                    int sy0 = (selected_sprite / 16) * 8;
+                    for (int py = 0; py < 8; py++)
+                        for (int px = 0; px < 8; px++)
+                            spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)] = 0;
+                    sprite_modified = true;
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Fill##spr_fill")) {
+                    int sx0 = (selected_sprite % 16) * 8;
+                    int sy0 = (selected_sprite / 16) * 8;
+                    for (int py = 0; py < 8; py++)
+                        for (int px = 0; px < 8; px++)
+                            spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)] = (uint8_t)selected_color;
+                    sprite_modified = true;
+                    update_spritesheet_texture();
+                    update_map_texture();
+                }
+
+                // Prev/Next sprite navigation
+                if (ImGui::Button("<##prev_spr") && selected_sprite > 0) selected_sprite--;
+                ImGui::SameLine();
+                if (ImGui::Button(">##next_spr") && selected_sprite < 255) selected_sprite++;
+                ImGui::SameLine();
+                ImGui::Text("Flags: 0x%02X", spritesheet.flags[selected_sprite]);
+
+                ImGui::Separator();
+
+                // ─── Color Palette ───
+                ImGui::Text("Color:");
+                for (int c = 0; c < 16; c++) {
+                    if (c > 0) ImGui::SameLine();
+                    ImVec4 col(pico8_palette[c][0] / 255.0f, pico8_palette[c][1] / 255.0f, pico8_palette[c][2] / 255.0f, 1.0f);
+                    char label[16];
+                    snprintf(label, sizeof(label), "##col%d", c);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button, col);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(col.x * 1.2f, col.y * 1.2f, col.z * 1.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, col);
+
+                    bool is_selected = (c == selected_color);
+                    if (is_selected) {
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 3.0f);
+                        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1, 1, 1, 1));
+                    }
+
+                    if (ImGui::Button(label, ImVec2(20, 20))) {
+                        selected_color = c;
+                    }
+
+                    if (is_selected) {
+                        ImGui::PopStyleColor();
+                        ImGui::PopStyleVar();
+                    }
+                    ImGui::PopStyleColor(3);
+                }
+
+                ImGui::Separator();
+
+                // ─── Pixel Grid ───
+                const float pixel_size = 24.0f;
+                int sx0 = (selected_sprite % 16) * 8;
+                int sy0 = (selected_sprite / 16) * 8;
+
+                ImVec2 grid_pos = ImGui::GetCursorScreenPos();
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+
+                // Draw pixels
+                for (int py = 0; py < 8; py++) {
+                    for (int px = 0; px < 8; px++) {
+                        uint8_t cidx = spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)];
+                        ImVec2 p0(grid_pos.x + px * pixel_size, grid_pos.y + py * pixel_size);
+                        ImVec2 p1(p0.x + pixel_size, p0.y + pixel_size);
+                        ImU32 col = IM_COL32(pico8_palette[cidx][0], pico8_palette[cidx][1], pico8_palette[cidx][2], 255);
+                        dl->AddRectFilled(p0, p1, col);
+                        dl->AddRect(p0, p1, IM_COL32(60, 60, 60, 255));
+                    }
+                }
+
+                // Invisible button over entire grid for input
+                ImGui::InvisibleButton("sprite_grid", ImVec2(8 * pixel_size, 8 * pixel_size));
+                if (ImGui::IsItemHovered()) {
+                    ImVec2 mouse = ImGui::GetIO().MousePos;
+                    int px = (int)((mouse.x - grid_pos.x) / pixel_size);
+                    int py = (int)((mouse.y - grid_pos.y) / pixel_size);
+                    if (px >= 0 && px < 8 && py >= 0 && py < 8) {
+                        uint8_t cur_color = spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)];
+                        ImGui::SetTooltip("(%d,%d) = %d", px, py, cur_color);
+
+                        // Highlight pixel
+                        ImVec2 hp0(grid_pos.x + px * pixel_size, grid_pos.y + py * pixel_size);
+                        ImVec2 hp1(hp0.x + pixel_size, hp0.y + pixel_size);
+                        dl->AddRect(hp0, hp1, IM_COL32(255, 255, 0, 255), 0, 0, 2.0f);
+
+                        // Left click: paint with selected color
+                        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                            spritesheet.sprite_data[(sy0 + py) * 128 + (sx0 + px)] = (uint8_t)selected_color;
+                            sprite_modified = true;
+                            update_spritesheet_texture();
+                            update_map_texture();
+                        }
+                        // Right click: eyedropper (pick color)
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                            selected_color = cur_color;
+                        }
+                    }
+                }
+
+                // ─── Sprite Flags Editor ───
+                ImGui::Separator();
+                ImGui::Text("Sprite Flags:");
+                for (int bit = 0; bit < 8; bit++) {
+                    if (bit > 0) ImGui::SameLine();
+                    bool flag = (spritesheet.flags[selected_sprite] >> bit) & 1;
+                    char flabel[16];
+                    snprintf(flabel, sizeof(flabel), "%d##flag%d", bit, bit);
+                    if (ImGui::Checkbox(flabel, &flag)) {
+                        if (flag) spritesheet.flags[selected_sprite] |= (1 << bit);
+                        else      spritesheet.flags[selected_sprite] &= ~(1 << bit);
+                        sprite_modified = true;
+                    }
+                }
+            } else {
+                ImGui::TextWrapped("No cartridge loaded.");
             }
             ImGui::End();
         }
@@ -631,8 +1064,12 @@ int main(int argc, char** argv) {
                 ImGui::Text("Non-empty sprites: %d / 256", sprite_count);
                 ImGui::Text("Non-empty map tiles: %d / %d", map_tile_count, 64 * 128);
                 ImGui::Text("Map position: (%d, %d)", map_x, map_y);
-                static const char* zoom_names[] = {"x0.25","x0.5","x1","x2","x4"};
-                ImGui::Text("Zoom: %s", zoom_names[zoom_idx]);
+                ImGui::Text("Selected sprite: %d", selected_sprite);
+                ImGui::Text("Selected color: %d", selected_color);
+                if (sprite_modified || map_modified) {
+                    ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "Unsaved changes: %s%s",
+                        sprite_modified ? "sprites " : "", map_modified ? "map" : "");
+                }
             }
             ImGui::Separator();
             ImGui::Text("FPS: %.1f", io.Framerate);
